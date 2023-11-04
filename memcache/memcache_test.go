@@ -162,7 +162,7 @@ func TestTLS(t *testing.T) {
 
 func mustSetF(t *testing.T, c *Client) func(*Item) {
 	return func(it *Item) {
-		if err := c.Set(it); err != nil {
+		if err := c.Set(context.Background(), it); err != nil {
 			t.Fatalf("failed to Set %#v: %v", *it, err)
 		}
 	}
@@ -179,29 +179,29 @@ func testWithClient(t *testing.T, c *Client) {
 
 	// Set
 	foo := &Item{Key: "foo", Value: []byte("fooval-fromset"), Flags: 123}
-	err := c.Set(foo)
+	err := c.Set(context.Background(), foo)
 	checkErr(err, "first set(foo): %v", err)
-	err = c.Set(foo)
+	err = c.Set(context.Background(), foo)
 	checkErr(err, "second set(foo): %v", err)
 
 	// CompareAndSwap
-	it, err := c.Get("foo")
+	it, err := c.Get(context.Background(), "foo")
 	checkErr(err, "get(foo): %v", err)
 	if string(it.Value) != "fooval-fromset" {
 		t.Errorf("get(foo) Value = %q, want fooval-romset", it.Value)
 	}
-	it0, err := c.Get("foo") // another get, to fail our CAS later
+	it0, err := c.Get(context.Background(), "foo") // another get, to fail our CAS later
 	checkErr(err, "get(foo): %v", err)
 	it.Value = []byte("fooval")
-	err = c.CompareAndSwap(it)
+	err = c.CompareAndSwap(context.Background(), it)
 	checkErr(err, "cas(foo): %v", err)
 	it0.Value = []byte("should-fail")
-	if err := c.CompareAndSwap(it0); err != ErrCASConflict {
+	if err := c.CompareAndSwap(context.Background(), it0); err != ErrCASConflict {
 		t.Fatalf("cas(foo) error = %v; want ErrCASConflict", err)
 	}
 
 	// Get
-	it, err = c.Get("foo")
+	it, err = c.Get(context.Background(), "foo")
 	checkErr(err, "get(foo): %v", err)
 	if it.Key != "foo" {
 		t.Errorf("get(foo) Key = %q, want foo", it.Key)
@@ -216,9 +216,9 @@ func testWithClient(t *testing.T, c *Client) {
 	// Get and set a unicode key
 	quxKey := "Hello_世界"
 	qux := &Item{Key: quxKey, Value: []byte("hello world")}
-	err = c.Set(qux)
+	err = c.Set(context.Background(), qux)
 	checkErr(err, "first set(Hello_世界): %v", err)
-	it, err = c.Get(quxKey)
+	it, err = c.Get(context.Background(), quxKey)
 	checkErr(err, "get(Hello_世界): %v", err)
 	if it.Key != quxKey {
 		t.Errorf("get(Hello_世界) Key = %q, want Hello_世界", it.Key)
@@ -229,33 +229,33 @@ func testWithClient(t *testing.T, c *Client) {
 
 	// Set malformed keys
 	malFormed := &Item{Key: "foo bar", Value: []byte("foobarval")}
-	err = c.Set(malFormed)
+	err = c.Set(context.Background(), malFormed)
 	if err != ErrMalformedKey {
 		t.Errorf("set(foo bar) should return ErrMalformedKey instead of %v", err)
 	}
 	malFormed = &Item{Key: "foo" + string(rune(0x7f)), Value: []byte("foobarval")}
-	err = c.Set(malFormed)
+	err = c.Set(context.Background(), malFormed)
 	if err != ErrMalformedKey {
 		t.Errorf("set(foo<0x7f>) should return ErrMalformedKey instead of %v", err)
 	}
 
 	// Add
 	bar := &Item{Key: "bar", Value: []byte("barval")}
-	err = c.Add(bar)
+	err = c.Add(context.Background(), bar)
 	checkErr(err, "first add(foo): %v", err)
-	if err := c.Add(bar); err != ErrNotStored {
+	if err := c.Add(context.Background(), bar); err != ErrNotStored {
 		t.Fatalf("second add(foo) want ErrNotStored, got %v", err)
 	}
 
 	// Append
 	append := &Item{Key: "append", Value: []byte("appendval")}
-	if err := c.Append(append); err != ErrNotStored {
+	if err := c.Append(context.Background(), append); err != ErrNotStored {
 		t.Fatalf("first append(append) want ErrNotStored, got %v", err)
 	}
-	c.Set(append)
-	err = c.Append(&Item{Key: "append", Value: []byte("1")})
+	c.Set(context.Background(), append)
+	err = c.Append(context.Background(), &Item{Key: "append", Value: []byte("1")})
 	checkErr(err, "second append(append): %v", err)
-	appended, err := c.Get("append")
+	appended, err := c.Get(context.Background(), "append")
 	checkErr(err, "third append(append): %v", err)
 	if string(appended.Value) != string(append.Value)+"1" {
 		t.Fatalf("Append: want=append1, got=%s", string(appended.Value))
@@ -263,13 +263,13 @@ func testWithClient(t *testing.T, c *Client) {
 
 	// Prepend
 	prepend := &Item{Key: "prepend", Value: []byte("prependval")}
-	if err := c.Prepend(prepend); err != ErrNotStored {
+	if err := c.Prepend(context.Background(), prepend); err != ErrNotStored {
 		t.Fatalf("first prepend(prepend) want ErrNotStored, got %v", err)
 	}
-	c.Set(prepend)
-	err = c.Prepend(&Item{Key: "prepend", Value: []byte("1")})
+	c.Set(context.Background(), prepend)
+	err = c.Prepend(context.Background(), &Item{Key: "prepend", Value: []byte("1")})
 	checkErr(err, "second prepend(prepend): %v", err)
-	prepended, err := c.Get("prepend")
+	prepended, err := c.Get(context.Background(), "prepend")
 	checkErr(err, "third prepend(prepend): %v", err)
 	if string(prepended.Value) != "1"+string(prepend.Value) {
 		t.Fatalf("Prepend: want=1prepend, got=%s", string(prepended.Value))
@@ -277,14 +277,14 @@ func testWithClient(t *testing.T, c *Client) {
 
 	// Replace
 	baz := &Item{Key: "baz", Value: []byte("bazvalue")}
-	if err := c.Replace(baz); err != ErrNotStored {
+	if err := c.Replace(context.Background(), baz); err != ErrNotStored {
 		t.Fatalf("expected replace(baz) to return ErrNotStored, got %v", err)
 	}
-	err = c.Replace(bar)
+	err = c.Replace(context.Background(), bar)
 	checkErr(err, "replaced(foo): %v", err)
 
 	// GetMulti
-	m, err := c.GetMulti([]string{"foo", "bar"})
+	m, err := c.GetMulti(context.Background(), []string{"foo", "bar"})
 	checkErr(err, "GetMulti: %v", err)
 	if g, e := len(m), 2; g != e {
 		t.Errorf("GetMulti: got len(map) = %d, want = %d", g, e)
@@ -303,48 +303,48 @@ func testWithClient(t *testing.T, c *Client) {
 	}
 
 	// Delete
-	err = c.Delete("foo")
+	err = c.Delete(context.Background(), "foo")
 	checkErr(err, "Delete: %v", err)
-	it, err = c.Get("foo")
+	it, err = c.Get(context.Background(), "foo")
 	if err != ErrCacheMiss {
 		t.Errorf("post-Delete want ErrCacheMiss, got %v", err)
 	}
 
 	// Incr/Decr
 	mustSet(&Item{Key: "num", Value: []byte("42")})
-	n, err := c.Increment("num", 8)
+	n, err := c.Increment(context.Background(), "num", 8)
 	checkErr(err, "Increment num + 8: %v", err)
 	if n != 50 {
 		t.Fatalf("Increment num + 8: want=50, got=%d", n)
 	}
-	n, err = c.Decrement("num", 49)
+	n, err = c.Decrement(context.Background(), "num", 49)
 	checkErr(err, "Decrement: %v", err)
 	if n != 1 {
 		t.Fatalf("Decrement 49: want=1, got=%d", n)
 	}
-	err = c.Delete("num")
+	err = c.Delete(context.Background(), "num")
 	checkErr(err, "delete num: %v", err)
-	n, err = c.Increment("num", 1)
+	n, err = c.Increment(context.Background(), "num", 1)
 	if err != ErrCacheMiss {
 		t.Fatalf("increment post-delete: want ErrCacheMiss, got %v", err)
 	}
 	mustSet(&Item{Key: "num", Value: []byte("not-numeric")})
-	n, err = c.Increment("num", 1)
+	n, err = c.Increment(context.Background(), "num", 1)
 	if err == nil || !strings.Contains(err.Error(), "client error") {
 		t.Fatalf("increment non-number: want client error, got %v", err)
 	}
 	testTouchWithClient(t, c)
 
 	// Test Delete All
-	err = c.DeleteAll()
+	err = c.DeleteAll(context.Background())
 	checkErr(err, "DeleteAll: %v", err)
-	it, err = c.Get("bar")
+	it, err = c.Get(context.Background(), "bar")
 	if err != ErrCacheMiss {
 		t.Errorf("post-DeleteAll want ErrCacheMiss, got %v", err)
 	}
 
 	// Test Ping
-	err = c.Ping()
+	err = c.Ping(context.Background())
 	checkErr(err, "error ping: %s", err)
 }
 
@@ -370,13 +370,13 @@ func testTouchWithClient(t *testing.T, c *Client) {
 
 	for s := 0; s < 3; s++ {
 		time.Sleep(time.Duration(1 * time.Second))
-		err := c.Touch(foo.Key, secondsToExpiry)
+		err := c.Touch(context.Background(), foo.Key, secondsToExpiry)
 		if nil != err {
 			t.Errorf("error touching foo: %v", err.Error())
 		}
 	}
 
-	_, err := c.Get("foo")
+	_, err := c.Get(context.Background(), "foo")
 	if err != nil {
 		if err == ErrCacheMiss {
 			t.Fatalf("touching failed to keep item foo alive")
@@ -385,7 +385,7 @@ func testTouchWithClient(t *testing.T, c *Client) {
 		}
 	}
 
-	_, err = c.Get("bar")
+	_, err = c.Get(context.Background(), "bar")
 	if err == nil {
 		t.Fatalf("item bar did not expire within %v seconds", time.Now().Sub(setTime).Seconds())
 	} else {
@@ -413,7 +413,7 @@ func BenchmarkOnItem(b *testing.B) {
 
 	addr := fakeServer.Addr()
 	c := New(addr.String())
-	if _, err := c.getConn(addr); err != nil {
+	if _, err := c.getConn(context.Background(), addr); err != nil {
 		b.Fatal("failed to initialize connection to fake server")
 	}
 
@@ -421,6 +421,6 @@ func BenchmarkOnItem(b *testing.B) {
 	dummyFn := func(_ *Client, _ *bufio.ReadWriter, _ *Item) error { return nil }
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		c.onItem(&item, dummyFn)
+		c.onItem(context.Background(), &item, dummyFn)
 	}
 }

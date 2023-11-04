@@ -265,8 +265,8 @@ func (cte *ConnectTimeoutError) Error() string {
 	return "memcache: connect timeout to " + cte.Addr.String()
 }
 
-func (c *Client) dial(addr net.Addr) (net.Conn, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), c.netTimeout())
+func (c *Client) dial(ctx context.Context, addr net.Addr) (net.Conn, error) {
+	ctx, cancel := context.WithTimeout(ctx, c.netTimeout())
 	defer cancel()
 
 	dialerContext := c.DialContext
@@ -289,13 +289,13 @@ func (c *Client) dial(addr net.Addr) (net.Conn, error) {
 	return nil, err
 }
 
-func (c *Client) getConn(addr net.Addr) (*conn, error) {
+func (c *Client) getConn(ctx context.Context, addr net.Addr) (*conn, error) {
 	cn, ok := c.getFreeConn(addr)
 	if ok {
 		cn.extendDeadline()
 		return cn, nil
 	}
-	nc, err := c.dial(addr)
+	nc, err := c.dial(ctx, addr)
 	if err != nil {
 		return nil, err
 	}
@@ -309,12 +309,12 @@ func (c *Client) getConn(addr net.Addr) (*conn, error) {
 	return cn, nil
 }
 
-func (c *Client) onItem(item *Item, fn func(*Client, *bufio.ReadWriter, *Item) error) error {
+func (c *Client) onItem(ctx context.Context, item *Item, fn func(*Client, *bufio.ReadWriter, *Item) error) error {
 	addr, err := c.selector.PickServer(item.Key)
 	if err != nil {
 		return err
 	}
-	cn, err := c.getConn(addr)
+	cn, err := c.getConn(ctx, addr)
 	if err != nil {
 		return err
 	}
@@ -325,15 +325,15 @@ func (c *Client) onItem(item *Item, fn func(*Client, *bufio.ReadWriter, *Item) e
 	return nil
 }
 
-func (c *Client) FlushAll() error {
-	return c.selector.Each(c.flushAllFromAddr)
+func (c *Client) FlushAll(ctx context.Context) error {
+	return c.selector.Each(ctx, c.flushAllFromAddr)
 }
 
 // Get gets the item for the given key. ErrCacheMiss is returned for a
 // memcache cache miss. The key must be at most 250 bytes in length.
-func (c *Client) Get(key string) (item *Item, err error) {
+func (c *Client) Get(ctx context.Context, key string) (item *Item, err error) {
 	err = c.withKeyAddr(key, func(addr net.Addr) error {
-		return c.getFromAddr(addr, []string{key}, func(it *Item) { item = it })
+		return c.getFromAddr(ctx, addr, []string{key}, func(it *Item) { item = it })
 	})
 	if err == nil && item == nil {
 		err = ErrCacheMiss
@@ -346,9 +346,9 @@ func (c *Client) Get(key string) (item *Item, err error) {
 // into the future at which time the item will expire. Zero means the item has
 // no expiration time. ErrCacheMiss is returned if the key is not in the cache.
 // The key must be at most 250 bytes in length.
-func (c *Client) Touch(key string, seconds int32) (err error) {
+func (c *Client) Touch(ctx context.Context, key string, seconds int32) (err error) {
 	return c.withKeyAddr(key, func(addr net.Addr) error {
-		return c.touchFromAddr(addr, []string{key}, seconds)
+		return c.touchFromAddr(ctx, addr, []string{key}, seconds)
 	})
 }
 
@@ -363,8 +363,8 @@ func (c *Client) withKeyAddr(key string, fn func(net.Addr) error) (err error) {
 	return fn(addr)
 }
 
-func (c *Client) withAddrRw(addr net.Addr, fn func(*bufio.ReadWriter) error) (err error) {
-	cn, err := c.getConn(addr)
+func (c *Client) withAddrRw(ctx context.Context, addr net.Addr, fn func(*bufio.ReadWriter) error) (err error) {
+	cn, err := c.getConn(ctx, addr)
 	if err != nil {
 		return err
 	}
@@ -372,14 +372,14 @@ func (c *Client) withAddrRw(addr net.Addr, fn func(*bufio.ReadWriter) error) (er
 	return fn(cn.rw)
 }
 
-func (c *Client) withKeyRw(key string, fn func(*bufio.ReadWriter) error) error {
+func (c *Client) withKeyRw(ctx context.Context, key string, fn func(*bufio.ReadWriter) error) error {
 	return c.withKeyAddr(key, func(addr net.Addr) error {
-		return c.withAddrRw(addr, fn)
+		return c.withAddrRw(ctx, addr, fn)
 	})
 }
 
-func (c *Client) getFromAddr(addr net.Addr, keys []string, cb func(*Item)) error {
-	return c.withAddrRw(addr, func(rw *bufio.ReadWriter) error {
+func (c *Client) getFromAddr(ctx context.Context, addr net.Addr, keys []string, cb func(*Item)) error {
+	return c.withAddrRw(ctx, addr, func(rw *bufio.ReadWriter) error {
 		if _, err := fmt.Fprintf(rw, "gets %s\r\n", strings.Join(keys, " ")); err != nil {
 			return err
 		}
@@ -394,8 +394,8 @@ func (c *Client) getFromAddr(addr net.Addr, keys []string, cb func(*Item)) error
 }
 
 // flushAllFromAddr send the flush_all command to the given addr
-func (c *Client) flushAllFromAddr(addr net.Addr) error {
-	return c.withAddrRw(addr, func(rw *bufio.ReadWriter) error {
+func (c *Client) flushAllFromAddr(ctx context.Context, addr net.Addr) error {
+	return c.withAddrRw(ctx, addr, func(rw *bufio.ReadWriter) error {
 		if _, err := fmt.Fprintf(rw, "flush_all\r\n"); err != nil {
 			return err
 		}
@@ -417,8 +417,8 @@ func (c *Client) flushAllFromAddr(addr net.Addr) error {
 }
 
 // ping sends the version command to the given addr
-func (c *Client) ping(addr net.Addr) error {
-	return c.withAddrRw(addr, func(rw *bufio.ReadWriter) error {
+func (c *Client) ping(ctx context.Context, addr net.Addr) error {
+	return c.withAddrRw(ctx, addr, func(rw *bufio.ReadWriter) error {
 		if _, err := fmt.Fprintf(rw, "version\r\n"); err != nil {
 			return err
 		}
@@ -440,8 +440,8 @@ func (c *Client) ping(addr net.Addr) error {
 	})
 }
 
-func (c *Client) touchFromAddr(addr net.Addr, keys []string, expiration int32) error {
-	return c.withAddrRw(addr, func(rw *bufio.ReadWriter) error {
+func (c *Client) touchFromAddr(ctx context.Context, addr net.Addr, keys []string, expiration int32) error {
+	return c.withAddrRw(ctx, addr, func(rw *bufio.ReadWriter) error {
 		for _, key := range keys {
 			if _, err := fmt.Fprintf(rw, "touch %s %d\r\n", key, expiration); err != nil {
 				return err
@@ -470,7 +470,7 @@ func (c *Client) touchFromAddr(addr net.Addr, keys []string, expiration int32) e
 // items may have fewer elements than the input slice, due to memcache
 // cache misses. Each key must be at most 250 bytes in length.
 // If no error is returned, the returned map will also be non-nil.
-func (c *Client) GetMulti(keys []string) (map[string]*Item, error) {
+func (c *Client) GetMulti(ctx context.Context, keys []string) (map[string]*Item, error) {
 	var lk sync.Mutex
 	m := make(map[string]*Item)
 	addItemToMap := func(it *Item) {
@@ -493,9 +493,9 @@ func (c *Client) GetMulti(keys []string) (map[string]*Item, error) {
 
 	ch := make(chan error, buffered)
 	for addr, keys := range keyMap {
-		go func(addr net.Addr, keys []string) {
-			ch <- c.getFromAddr(addr, keys, addItemToMap)
-		}(addr, keys)
+		go func(ctx context.Context, addr net.Addr, keys []string) {
+			ch <- c.getFromAddr(ctx, addr, keys, addItemToMap)
+		}(ctx, addr, keys)
 	}
 
 	var err error
@@ -555,8 +555,8 @@ func scanGetResponseLine(line []byte, it *Item) (size int, err error) {
 }
 
 // Set writes the given item, unconditionally.
-func (c *Client) Set(item *Item) error {
-	return c.onItem(item, (*Client).set)
+func (c *Client) Set(ctx context.Context, item *Item) error {
+	return c.onItem(ctx, item, (*Client).set)
 }
 
 func (c *Client) set(rw *bufio.ReadWriter, item *Item) error {
@@ -565,8 +565,8 @@ func (c *Client) set(rw *bufio.ReadWriter, item *Item) error {
 
 // Add writes the given item, if no value already exists for its
 // key. ErrNotStored is returned if that condition is not met.
-func (c *Client) Add(item *Item) error {
-	return c.onItem(item, (*Client).add)
+func (c *Client) Add(ctx context.Context, item *Item) error {
+	return c.onItem(ctx, item, (*Client).add)
 }
 
 func (c *Client) add(rw *bufio.ReadWriter, item *Item) error {
@@ -575,8 +575,8 @@ func (c *Client) add(rw *bufio.ReadWriter, item *Item) error {
 
 // Replace writes the given item, but only if the server *does*
 // already hold data for this key
-func (c *Client) Replace(item *Item) error {
-	return c.onItem(item, (*Client).replace)
+func (c *Client) Replace(ctx context.Context, item *Item) error {
+	return c.onItem(ctx, item, (*Client).replace)
 }
 
 func (c *Client) replace(rw *bufio.ReadWriter, item *Item) error {
@@ -585,8 +585,8 @@ func (c *Client) replace(rw *bufio.ReadWriter, item *Item) error {
 
 // Append appends the given item to the existing item, if a value already
 // exists for its key. ErrNotStored is returned if that condition is not met.
-func (c *Client) Append(item *Item) error {
-	return c.onItem(item, (*Client).append)
+func (c *Client) Append(ctx context.Context, item *Item) error {
+	return c.onItem(ctx, item, (*Client).append)
 }
 
 func (c *Client) append(rw *bufio.ReadWriter, item *Item) error {
@@ -595,8 +595,8 @@ func (c *Client) append(rw *bufio.ReadWriter, item *Item) error {
 
 // Prepend prepends the given item to the existing item, if a value already
 // exists for its key. ErrNotStored is returned if that condition is not met.
-func (c *Client) Prepend(item *Item) error {
-	return c.onItem(item, (*Client).prepend)
+func (c *Client) Prepend(ctx context.Context, item *Item) error {
+	return c.onItem(ctx, item, (*Client).prepend)
 }
 
 func (c *Client) prepend(rw *bufio.ReadWriter, item *Item) error {
@@ -610,8 +610,8 @@ func (c *Client) prepend(rw *bufio.ReadWriter, item *Item) error {
 // is returned if the value was modified in between the
 // calls. ErrNotStored is returned if the value was evicted in between
 // the calls.
-func (c *Client) CompareAndSwap(item *Item) error {
-	return c.onItem(item, (*Client).cas)
+func (c *Client) CompareAndSwap(ctx context.Context, item *Item) error {
+	return c.onItem(ctx, item, (*Client).cas)
 }
 
 func (c *Client) cas(rw *bufio.ReadWriter, item *Item) error {
@@ -693,23 +693,23 @@ func writeExpectf(rw *bufio.ReadWriter, expect []byte, format string, args ...in
 
 // Delete deletes the item with the provided key. The error ErrCacheMiss is
 // returned if the item didn't already exist in the cache.
-func (c *Client) Delete(key string) error {
-	return c.withKeyRw(key, func(rw *bufio.ReadWriter) error {
+func (c *Client) Delete(ctx context.Context, key string) error {
+	return c.withKeyRw(ctx, key, func(rw *bufio.ReadWriter) error {
 		return writeExpectf(rw, resultDeleted, "delete %s\r\n", key)
 	})
 }
 
 // DeleteAll deletes all items in the cache.
-func (c *Client) DeleteAll() error {
-	return c.withKeyRw("", func(rw *bufio.ReadWriter) error {
+func (c *Client) DeleteAll(ctx context.Context) error {
+	return c.withKeyRw(ctx, "", func(rw *bufio.ReadWriter) error {
 		return writeExpectf(rw, resultDeleted, "flush_all\r\n")
 	})
 }
 
 // Ping checks all instances if they are alive. Returns error if any
 // of them is down.
-func (c *Client) Ping() error {
-	return c.selector.Each(c.ping)
+func (c *Client) Ping(ctx context.Context) error {
+	return c.selector.Each(ctx, c.ping)
 }
 
 // Increment atomically increments key by delta. The return value is
@@ -717,8 +717,8 @@ func (c *Client) Ping() error {
 // didn't exist in memcached the error is ErrCacheMiss. The value in
 // memcached must be an decimal number, or an error will be returned.
 // On 64-bit overflow, the new value wraps around.
-func (c *Client) Increment(key string, delta uint64) (newValue uint64, err error) {
-	return c.incrDecr("incr", key, delta)
+func (c *Client) Increment(ctx context.Context, key string, delta uint64) (newValue uint64, err error) {
+	return c.incrDecr(ctx, "incr", key, delta)
 }
 
 // Decrement atomically decrements key by delta. The return value is
@@ -727,13 +727,13 @@ func (c *Client) Increment(key string, delta uint64) (newValue uint64, err error
 // memcached must be an decimal number, or an error will be returned.
 // On underflow, the new value is capped at zero and does not wrap
 // around.
-func (c *Client) Decrement(key string, delta uint64) (newValue uint64, err error) {
-	return c.incrDecr("decr", key, delta)
+func (c *Client) Decrement(ctx context.Context, key string, delta uint64) (newValue uint64, err error) {
+	return c.incrDecr(ctx, "decr", key, delta)
 }
 
-func (c *Client) incrDecr(verb, key string, delta uint64) (uint64, error) {
+func (c *Client) incrDecr(ctx context.Context, verb, key string, delta uint64) (uint64, error) {
 	var val uint64
-	err := c.withKeyRw(key, func(rw *bufio.ReadWriter) error {
+	err := c.withKeyRw(ctx, key, func(rw *bufio.ReadWriter) error {
 		line, err := writeReadLine(rw, "%s %s %d\r\n", verb, key, delta)
 		if err != nil {
 			return err
