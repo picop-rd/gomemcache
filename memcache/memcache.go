@@ -145,7 +145,7 @@ type Client struct {
 	Timeout time.Duration
 
 	// MaxIdleConns specifies the maximum number of idle connections that will
-	// be maintained per address. If less than one, DefaultMaxIdleConns will be
+	// be maintained per address. If less than zero, DefaultMaxIdleConns will be
 	// used.
 	//
 	// Consider your expected traffic rates and latency carefully. This should
@@ -248,7 +248,7 @@ func (c *Client) netTimeout() time.Duration {
 }
 
 func (c *Client) maxIdleConns() int {
-	if c.MaxIdleConns > 0 {
+	if c.MaxIdleConns >= 0 {
 		return c.MaxIdleConns
 	}
 	return DefaultMaxIdleConns
